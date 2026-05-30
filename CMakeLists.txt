@@ -1,4 +1,4 @@
-cmake_minimum_required( VERSION 2.8 )
+cmake_minimum_required( VERSION 3.10 )
 
 project(plotIt LANGUAGES CXX)
 
@@ -11,17 +11,10 @@ if(EXISTS "$ENV{CMAKE_PREFIX_PATH}/include/boost")
   set(Boost_NO_BOOST_CMAKE ON)
 endif()
 
-find_package(ROOT REQUIRED COMPONENTS HistPainter Tree)
-find_package(Boost REQUIRED COMPONENTS filesystem regex system)
+find_package(ROOT REQUIRED COMPONENTS Hist HistPainter Tree)
+find_package(Boost REQUIRED COMPONENTS filesystem regex)
+find_package(yaml-cpp REQUIRED)
 
-ExternalProject_Add(
-  yaml-cpp-build
-  URL https://github.com/jbeder/yaml-cpp/archive/yaml-cpp-0.6.2.tar.gz
-  CMAKE_ARGS -DYAML_CPP_BUILD_TOOLS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF -DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/external
-  )
-add_library(yaml-cpp STATIC IMPORTED)
-add_dependencies(yaml-cpp yaml-cpp-build)
-set_target_properties(yaml-cpp PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/external/lib/libyaml-cpp.a)
 ExternalProject_Add(
   tclap
   URL https://github.com/mirror/tclap/archive/refs/heads/1.2.zip
@@ -41,25 +34,32 @@ set(SRCS
   src/uuid.cc
   )
 
-add_executable(plotIt ${SRCS})
-add_dependencies(plotIt tclap)
+add_library(plotItlib SHARED ${SRCS})
+target_link_libraries(plotItlib PUBLIC Boost::filesystem Boost::regex yaml-cpp)
+target_include_directories(plotItlib PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 # workaround, should be inherited from ROOT dependency targets (if present), but is not specified there for versions below 6.18.00
 if((${ROOT_VERSION} VERSION_LESS "6.18.00"))
   if(${ROOT_cxx17_FOUND})
-    target_compile_features(plotIt PRIVATE cxx_std_17)
+    target_compile_features(plotItlib PRIVATE cxx_std_17)
   elseif(${ROOT_cxx14_FOUND})
-    target_compile_features(plotIt PRIVATE cxx_std_14)
+    target_compile_features(plotItlib PRIVATE cxx_std_14)
   elseif(${ROOT_cxx11_FOUND})
-    target_compile_features(plotIt PRIVATE cxx_std_11)
+    target_compile_features(plotItlib PRIVATE cxx_std_11)
   endif()
 endif()
-if(TARGET ROOT::Tree AND TARGET ROOT::HistPainter)
-  target_link_libraries(plotIt ROOT::HistPainter ROOT::Tree dl Boost::filesystem Boost::regex Boost::system yaml-cpp)
-  target_include_directories(plotIt PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> ${CMAKE_CURRENT_BINARY_DIR}/external/include)
+if(TARGET ROOT::Hist AND TARGET ROOT::Tree AND TARGET ROOT::HistPainter)
+  target_link_libraries(plotItlib PUBLIC ROOT::Hist ROOT::HistPainter ROOT::Tree dl)
 else()
-  target_link_libraries(plotIt ${ROOT_LIBRARIES} dl Boost::filesystem Boost::regex Boost::system yaml-cpp)
-  target_include_directories(plotIt PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> ${CMAKE_CURRENT_BINARY_DIR}/external/include ${ROOT_INCLUDE_DIRS})
+  target_link_libraries(plotItlib PUBLIC ${ROOT_LIBRARIES} dl)
+  target_include_directories(plotItlib PRIVATE ${ROOT_INCLUDE_DIRS})
 endif()
+add_executable(plotIt src/main.cc)
+add_dependencies(plotIt tclap)
+target_link_libraries(plotIt PUBLIC plotItlib)
+target_include_directories(plotIt PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> ${CMAKE_CURRENT_BINARY_DIR}/external/include)
 install(TARGETS plotIt
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   )
+install(TARGETS plotItlib DESTINATION ${CMAKE_INSTALL_LIBDIR})
+file(GLOB plotIt_INCLUDES include/*.h)
+install(FILES ${plotIt_INCLUDES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/plotIt)
